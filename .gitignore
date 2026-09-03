@@ -1,0 +1,10 @@
+bin/
+.env
+.env.local
+*.test
+coverage.out
+data/
+
+# bundles used to move the code onto this machine
+*.tar.gz
+.DS_Store
