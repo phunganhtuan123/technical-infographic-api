@@ -1,0 +1,28 @@
+# Deployment settings for this machine.
+#
+# 8080 and 5432 are already taken by other services here, so the API is
+# published on 8085 and Postgres on 5433 (loopback only). The Cloudflare
+# tunnel maps infographic-api.flytory.com -> 8085.
+#
+# Secrets are not in this file. JWT_SECRET comes from .env, which is gitignored.
+services:
+  postgres:
+    ports: !override ["127.0.0.1:5433:5432"]
+
+  api:
+    ports: !override ["8085:8080"]
+    environment:
+      APP_ENV: production
+
+      # Every origin the editor is actually served from. Without its own origin
+      # listed here the browser refuses the response, which is what made sign-up
+      # look broken while the account was in fact being created.
+      EDITOR_ORIGINS: "https://infographic.flytory.com,http://192.168.1.250:8095,http://192.168.1.249:8095,http://10.0.0.3:8095,http://localhost:3000"
+
+      # The editor and the API are separate origins, so the refresh cookie has
+      # to be SameSite=None, and None is only honoured together with Secure.
+      # The API is reached over HTTPS from every origin above, LAN included.
+      COOKIE_SECURE: "true"
+      COOKIE_DOMAIN: ""
+
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
