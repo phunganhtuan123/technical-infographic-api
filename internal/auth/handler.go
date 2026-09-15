@@ -148,12 +148,22 @@ func (h *Handler) clearRefreshCookie(c echo.Context) {
 	})
 }
 
-// contextUserKey is unexported so nothing outside this package can plant a user
-// id in the context and walk past the middleware.
-const contextUserKey = "auth.user_id"
+// These are unexported so nothing outside this package can plant a user id or
+// a role in the context and walk past the middleware.
+const (
+	contextUserKey = "auth.user_id"
+	contextRoleKey = "auth.role"
+)
 
-// Middleware rejects anything without a valid access token. It does not touch
-// the database: that is the whole point of a signed, short-lived token.
+// Middleware rejects anything without a valid access token, and confirms the
+// account behind it is still live.
+//
+// The token used to be trusted on its own — a signed, short-lived claim needs
+// no database round trip, and that is genuinely most of why requests are cheap.
+// Suspension is what broke it: an access token is signed for fifteen minutes,
+// and an administrator who locks an account expects it to stop working now, not
+// at some point inside the next quarter of an hour. So one primary-key read,
+// which also carries the role and saves the admin routes a second query.
 func (m *Manager) Middleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -167,9 +177,36 @@ func (m *Manager) Middleware() echo.MiddlewareFunc {
 				return httpx.New(http.StatusUnauthorized, "token_invalid",
 					"Your session expired. Refreshing…")
 			}
+
+			var account model.User
+			// Soft-deleted rows are excluded by GORM, so a deleted account
+			// fails here the same way a forged token does.
+			if err := m.db.WithContext(c.Request().Context()).
+				Select("id", "role", "disabled_at").
+				First(&account, "id = ?", userID).Error; err != nil {
+				return httpx.ErrUnauthorized
+			}
+			if account.IsDisabled() {
+				return ErrAccountDisabled
+			}
+
 			c.Set(contextUserKey, userID)
+			c.Set(contextRoleKey, account.Role)
 			return next(c)
 		}
+	}
+}
+
+// RequireAdmin refuses everyone the middleware above did not mark as an
+// administrator. Mounted as its own layer rather than checked inside each
+// handler: a route that forgets the check is then a route that does not
+// compile into the admin group at all.
+func RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if RoleOf(c) != model.RoleAdmin {
+			return httpx.ErrForbidden
+		}
+		return next(c)
 	}
 }
 
@@ -181,4 +218,14 @@ func UserID(c echo.Context) (uuid.UUID, error) {
 		return uuid.Nil, httpx.ErrUnauthorized
 	}
 	return value, nil
+}
+
+// RoleOf returns the caller's role, or the ordinary one when the request never
+// went through Middleware — failing closed rather than open.
+func RoleOf(c echo.Context) model.Role {
+	value, ok := c.Get(contextRoleKey).(model.Role)
+	if !ok {
+		return model.RoleUser
+	}
+	return value
 }

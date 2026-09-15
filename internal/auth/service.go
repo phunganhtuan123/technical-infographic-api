@@ -41,6 +41,11 @@ var (
 		"That email and password do not match an account.")
 	errEmailTaken = httpx.Conflict("email_taken",
 		"An account already uses that email. Sign in instead, or reset the password.")
+	// Suspension is deliberately not disguised as a wrong password. The person
+	// is not guessing — they are locked out and need to know to ask someone,
+	// and nothing is leaked: they already proved the account is theirs.
+	ErrAccountDisabled = httpx.New(http.StatusForbidden, "account_disabled",
+		"This account has been suspended. Contact an administrator.")
 )
 
 // A hash of a value nobody knows, so Login can spend the same time on a missing
@@ -120,6 +125,12 @@ func (m *Manager) Login(ctx context.Context, email, password string) (model.User
 	if err := VerifyPassword(password, *user.PasswordHash); err != nil {
 		return model.User{}, errInvalidCredentials
 	}
+	// Checked after the password, not before: answering "suspended" to someone
+	// who did not know the password would turn this endpoint into a way of
+	// enumerating which accounts exist.
+	if user.IsDisabled() {
+		return model.User{}, ErrAccountDisabled
+	}
 	return user, nil
 }
 
@@ -183,6 +194,14 @@ func (m *Manager) Refresh(ctx context.Context, presented, userAgent, ip string) 
 	var user model.User
 	if err := m.db.WithContext(ctx).First(&user, "id = ?", record.UserID).Error; err != nil {
 		return Session{}, httpx.ErrUnauthorized
+	}
+	// A suspension that arrived mid-session ends here. Revoking the family as
+	// well stops the browser's refresh timer walking back in every few minutes.
+	if user.IsDisabled() {
+		if err := m.revokeFamily(ctx, record.FamilyID); err != nil {
+			return Session{}, err
+		}
+		return Session{}, ErrAccountDisabled
 	}
 
 	now := time.Now()

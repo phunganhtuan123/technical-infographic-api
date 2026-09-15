@@ -20,6 +20,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/phunganhtuan123/technical-infographic-api/internal/admin"
 	"github.com/phunganhtuan123/technical-infographic-api/internal/asset"
 	"github.com/phunganhtuan123/technical-infographic-api/internal/auth"
 	"github.com/phunganhtuan123/technical-infographic-api/internal/config"
@@ -83,6 +84,17 @@ func run() error {
 
 	manager := auth.NewManager(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
+	// Before any route is served: a deployment with nobody who can administer
+	// it is a deployment that needs a database console to fix.
+	if len(cfg.AdminEmails) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := admin.Bootstrap(ctx, db, manager, cfg.AdminEmails, cfg.AdminPassword)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+
 	sameSite := http.SameSiteLaxMode
 	if cfg.CookieSecure {
 		// Once the editor and the API are on different sites, Lax stops the
@@ -133,6 +145,7 @@ func run() error {
 	// Everything below needs a valid access token.
 	secure := v1.Group("", manager.Middleware())
 	user.NewHandler(db).Register(secure)
+	admin.NewHandler(db, manager).Register(secure)
 	project.NewHandler(project.NewService(db, cfg.MaxDocumentBytes)).Register(secure)
 	assets.RegisterSecure(secure)
 

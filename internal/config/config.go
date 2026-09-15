@@ -43,6 +43,13 @@ type Config struct {
 	MaxAssetBytes int64
 	AssetURLTTL   time.Duration
 
+	// AdminEmails are promoted to administrator on every boot, and the first
+	// of them is created with AdminPassword when no such account exists yet.
+	// This is how a fresh deployment gets somebody who can open the account
+	// screen, which otherwise only an administrator can open.
+	AdminEmails   []string
+	AdminPassword string
+
 	// Rate limits. Two layers on the credential endpoints; see
 	// internal/auth/ratelimit.go for why neither alone is enough.
 	RateLimitEnabled     bool
@@ -90,6 +97,16 @@ func Load() (Config, error) {
 
 	cfg.CookieSecure = envBool("COOKIE_SECURE", cfg.Env != "development")
 	cfg.AssetURLTTL = envDuration("ASSET_URL_TTL", time.Hour)
+
+	for _, email := range strings.Split(env("ADMIN_EMAILS", ""), ",") {
+		if trimmed := strings.TrimSpace(email); trimmed != "" {
+			cfg.AdminEmails = append(cfg.AdminEmails, trimmed)
+		}
+	}
+	cfg.AdminPassword = os.Getenv("ADMIN_PASSWORD")
+	if cfg.AdminPassword != "" && len(cfg.AdminPassword) < 10 {
+		return cfg, fmt.Errorf("ADMIN_PASSWORD must be at least 10 characters")
+	}
 
 	cfg.RateLimitEnabled = envBool("RATE_LIMIT_ENABLED", true)
 	cfg.AuthAttemptsPerIP = envInt("AUTH_ATTEMPTS_PER_IP", 20)

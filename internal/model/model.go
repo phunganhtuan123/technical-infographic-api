@@ -21,20 +21,35 @@ const (
 	ProviderFacebook Provider = "facebook"
 )
 
+// Role decides what an account may do. Two values, because a third one always
+// arrives with a question nobody has answered yet ("can a moderator suspend an
+// admin?") and the cheapest time to refuse that question is now.
+type Role string
+
+const (
+	RoleUser  Role = "user"
+	RoleAdmin Role = "admin"
+)
+
 // User is the account. Email is a pointer because Facebook does not always
 // return one — people who signed up by phone, or who declined the email
 // permission, arrive with nothing. A NOT NULL column here breaks that login in
 // production rather than in testing.
 type User struct {
-	ID              uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Email           *string        `gorm:"type:citext" json:"email,omitempty"`
-	EmailVerifiedAt *time.Time     `json:"emailVerifiedAt,omitempty"`
-	PasswordHash    *string        `gorm:"type:text" json:"-"`
-	DisplayName     string         `gorm:"type:text;not null;default:''" json:"displayName"`
-	AvatarURL       *string        `gorm:"type:text" json:"avatarUrl,omitempty"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	UpdatedAt       time.Time      `json:"updatedAt"`
-	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	ID              uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Email           *string    `gorm:"type:citext" json:"email,omitempty"`
+	EmailVerifiedAt *time.Time `json:"emailVerifiedAt,omitempty"`
+	PasswordHash    *string    `gorm:"type:text" json:"-"`
+	DisplayName     string     `gorm:"type:text;not null;default:''" json:"displayName"`
+	AvatarURL       *string    `gorm:"type:text" json:"avatarUrl,omitempty"`
+	Role            Role       `gorm:"type:text;not null;default:'user'" json:"role"`
+	// DisabledAt suspends the account without destroying it: a timestamp rather
+	// than a boolean, because the first question asked about a locked-out user
+	// is always when it happened.
+	DisabledAt *time.Time     `json:"disabledAt,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Identities []Identity    `gorm:"constraint:OnDelete:CASCADE" json:"identities,omitempty"`
 	Settings   *UserSettings `gorm:"constraint:OnDelete:CASCADE" json:"settings,omitempty"`
@@ -43,6 +58,12 @@ type User struct {
 // HasEmail reports whether this account can receive mail. Verification,
 // password reset and sharing invitations all depend on it.
 func (u User) HasEmail() bool { return u.Email != nil && *u.Email != "" }
+
+// IsAdmin reports whether this account may manage other accounts.
+func (u User) IsAdmin() bool { return u.Role == RoleAdmin }
+
+// IsDisabled reports whether an administrator has suspended this account.
+func (u User) IsDisabled() bool { return u.DisabledAt != nil }
 
 // Identity links one sign-in method to a user. The key is (provider, subject),
 // never email — a person can change the email on their Google account and it

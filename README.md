@@ -86,6 +86,35 @@ Everything lives under `/v1`. Sign-in routes are open; the rest needs
 | `GET /projects/:id/assets` | Images attached to this project. |
 | `GET /assets/:id?exp=&sig=` | The image itself. Signature in the URL, no header. |
 | `DELETE /assets/:id` | Remove one. |
+| `GET /admin/users` | Every account, with its project count. `query`, `status`, `limit`, `offset`. |
+| `PATCH /admin/users/:id` | `{"disabled":true\|false}` and/or `{"role":"user"\|"admin"}`. |
+| `DELETE /admin/users/:id` | Soft delete, and sign the account out everywhere. |
+
+### Administration
+
+Three routes, behind `RequireAdmin` applied to the group rather than to each
+one — a route added later cannot forget the check, because it does not compile
+into the group without it.
+
+Suspension is a timestamp on `users.disabled_at`, not a deleted row: it is
+reversible, it keeps the person's projects, and it answers "since when" without
+a separate audit table. Making it take effect immediately cost the access-token
+middleware its one property — it used to need no database at all — because a
+token is signed for fifteen minutes and an operator who locks an account expects
+that now, not eventually. It is a primary-key read, and it carries the role back
+so the admin routes do not query twice.
+
+Four things the screen refuses, all the same mistake in different clothes:
+suspending yourself, demoting yourself, deleting yourself, and removing the last
+active administrator. The rules are pure functions in `internal/admin/guard.go`
+with tests, because the failure they prevent is one only a database console can
+undo.
+
+The first administrator comes from the environment — `ADMIN_EMAILS`, plus
+`ADMIN_PASSWORD` to create the first one on a database with no accounts yet.
+Promotion happens on every boot and is idempotent; taking an address out of the
+list never demotes anyone, since silently removing access at deploy time is
+worse than revoking it on the screen built for it.
 
 ### Images
 
