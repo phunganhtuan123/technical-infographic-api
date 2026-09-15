@@ -26,3 +26,8 @@ services:
       COOKIE_DOMAIN: ""
 
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+
+      # Promoted on every boot. ADMIN_PASSWORD is deliberately absent: it only
+      # creates the first account when none exists, and this address already has
+      # one — so there is nothing to create and no password to set here.
+      ADMIN_EMAILS: "phunganhtuan123@gmail.com"
